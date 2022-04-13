@@ -1,18 +1,18 @@
 version: '3.8'
 
 services:
-  ml_api:
+  stylegan3_api:
     build:
       context: .
-      dockerfile: ./Dockerfile.api
-    image: ml_api:0.4.1
-    container_name: ml_api
+      dockerfile: api.Dockerfile
+    image: stylegan3_api:0.4.1
+    container_name: stylegan3_api
     restart: "always"
     command: uvicorn app.main:app --host 0.0.0.0 --reload
     volumes:
       - .:/app
     ports:
-      - "7070:7070"
+      - "9090:9090"
     networks:
       - stylegan3_net
 
