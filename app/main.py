@@ -1,26 +1,11 @@
-import nvsmi
-import torch
-import sys
-
 from fastapi import FastAPI
-from fastapi.encoders import jsonable_encoder
+from starlette.middleware.cors import CORSMiddleware
+
+from app.routes.root_routes import router as root_routes
 
 app = FastAPI(title="StyleGAN3 API")
 
+app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"],
+                   allow_headers=["*"], )
 
-@app.get("/")
-def home():
-    return {"hello": "world"}
-
-
-@app.get("/gpu_type")
-def gpu_type():
-    return {"gpus": list(nvsmi.get_gpus()), "available_gpus": list(nvsmi.get_available_gpus()),
-            "gpu_processes": nvsmi.get_gpu_processes()}
-
-
-@app.get("/torch_device")
-def torch_device():
-    device = torch.device('cuda:0')
-    print('Using device:', device, file=sys.stderr)
-    return {"device": str(device)}
+app.include_router(root_routes)
