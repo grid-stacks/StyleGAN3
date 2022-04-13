@@ -8,11 +8,11 @@ services:
     image: stylegan3_api:0.4.1
     container_name: stylegan3_api
     restart: "always"
-    command: uvicorn app.main:app --host 0.0.0.0 --reload
+    command: uvicorn app.main:app --host 0.0.0.0 --port 9000 --reload
     volumes:
       - .:/app
     ports:
-      - "9090:9090"
+      - "9090:9000"
     networks:
       - stylegan3_net
 
