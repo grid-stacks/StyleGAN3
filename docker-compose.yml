@@ -1,0 +1,21 @@
+version: '3.8'
+
+services:
+  ml_api:
+    build:
+      context: .
+      dockerfile: ./Dockerfile.api
+    image: ml_api:0.4.1
+    container_name: ml_api
+    restart: "always"
+    command: uvicorn app.main:app --host 0.0.0.0 --reload
+    volumes:
+      - .:/app
+    ports:
+      - "7070:7070"
+    networks:
+      - stylegan3_net
+
+networks:
+  stylegan3_net:
+    driver: bridge
