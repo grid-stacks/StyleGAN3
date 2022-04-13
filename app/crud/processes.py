@@ -24,7 +24,7 @@ from einops import rearrange
 
 device = torch.device('cuda:0')
 
-sys.path.append('./stylegan3')
+sys.path.append('../stylegan3')
 
 
 def fetch(url_or_path):
