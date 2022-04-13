@@ -7,6 +7,12 @@ nvsmi
 einops
 ninja
 gdown
+numpy
+pillow
+requests
+tqdm
+IPython
+anvil
 
 --find-links https://download.pytorch.org/whl/torch_stable.html
 torch==1.9.1+cu111
