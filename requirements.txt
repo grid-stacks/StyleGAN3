@@ -13,10 +13,13 @@ requests
 tqdm
 IPython
 anvil
+python-multipart
 
---find-links https://download.pytorch.org/whl/torch_stable.html
-torch==1.9.1+cu111
---find-links https://download.pytorch.org/whl/torch_stable.html
-torchvision==0.10.1+cu111
+--find-links https://download.pytorch.org/whl/cu111/torch-1.10.0%2Bcu111-cp37-cp37m-linux_x86_64.whl
+torch
+--find-links https://download.pytorch.org/whl/cu111/torchvision-0.11.1%2Bcu111-cp37-cp37m-linux_x86_64.whl
+torchvision
 
 git+https://github.com/openai/CLIP
+
+torch-utils
