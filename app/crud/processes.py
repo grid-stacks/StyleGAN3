@@ -1,30 +1,47 @@
-import sys
-
 import io
 import os
-import time
-import glob
-import subprocess
 import pickle
-import shutil
+import re
+import subprocess
+import sys
+import time
+import unicodedata
+
+import clip
 import numpy as np
-from PIL import Image
+import requests
 import torch
 import torch.nn.functional as F
-import requests
 import torchvision.transforms as transforms
 import torchvision.transforms.functional as TF
-import clip
-import unicodedata
-import re
-from tqdm.notebook import tqdm
-from torchvision.transforms import Compose, Resize, ToTensor, Normalize
 from IPython.display import display
+from PIL import Image
 from einops import rearrange
+from fastapi import Body
+from starlette.responses import FileResponse
+from torchvision.transforms import Compose, Resize
+from tqdm.notebook import tqdm
+
+from app.crud.models import retrieve_model
+from app.schemas import ModelOptionEnum, SeedSchema
+
+gan3_path = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    'stylegan3'
+)
+# tu_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'stylegan3', 'torch_utils')
+# dnnlib_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'stylegan3', 'dnnlib')
+
+sys.path.append("../stylegan3")
+# sys.path.append(tu_path)
+# sys.path.append(dnnlib_path)
 
 device = torch.device('cuda:0')
 
-sys.path.append('../stylegan3')
+tf = Compose([
+    Resize(224),
+    lambda x: torch.clamp((x + 1) / 2, min=0, max=1),
+])
 
 
 def fetch(url_or_path):
@@ -153,3 +170,187 @@ def embed_image(image):
 def embed_url(url):
     image = Image.open(fetch(url)).convert('RGB')
     return embed_image(TF.to_tensor(image).to(device).unsqueeze(0)).mean(0).squeeze(0)
+
+
+def G(model: ModelOptionEnum):
+    try:
+        model = retrieve_model(model)
+        print(model)
+        with open(model["file"], 'rb') as fp:
+            try:
+                print("-- 1")
+                print(gan3_path)
+                print(fp)
+                g = pickle.load(fp)['G_ema'].to(device)
+                print("-- 2")
+                print(g)
+                return g
+            except Exception as e:
+                print('-- 3', e)
+
+    except ModuleNotFoundError as e:
+        return {"error": str(e)}
+
+
+def w_stds(model: ModelOptionEnum):
+    try:
+        g = G(model)
+
+        zs = torch.randn([10000, g.mapping.z_dim], device=device)
+        w = g.mapping(zs, None).std(0)
+        print(w)
+        return g, w
+    except Exception as e:
+        print('--l195', e)
+
+
+def seeding(data: SeedSchema):
+    seeds = [data.seed_1, data.seed_2, data.seed_3]
+
+    if data.seed_1 == -1:
+        seed = np.random.randint(0, 9e9)
+        print(f"Your random seed is: {seed}")
+
+    texts = [frase.strip() for frase in data.texts.split("|") if frase]
+
+    targets = [clip_model.embed_text(text) for text in texts]
+
+    return seeds, targets
+
+
+def run(timestring, seed, model: ModelOptionEnum, targets, steps):
+    g, w = w_stds(model)
+
+    torch.manual_seed(seed)
+
+    # Init
+    # Sample 32 inits and choose the one closest to prompt
+
+    with torch.no_grad():
+        qs = []
+        losses = []
+        for _ in range(8):
+            q = (g.mapping(torch.randn([4, g.mapping.z_dim], device=device), None,
+                           truncation_psi=0.7) - g.mapping.w_avg) / w
+            images = g.synthesis(q * w + g.mapping.w_avg)
+            embeds = embed_image(images.add(1).div(2))
+            loss = prompts_dist_loss(embeds, targets, spherical_dist_loss).mean(0)
+            i = torch.argmin(loss)
+            qs.append(q[i])
+            losses.append(loss[i])
+        qs = torch.stack(qs)
+        losses = torch.stack(losses)
+        # print(losses)
+        # print(losses.shape, qs.shape)
+        i = torch.argmin(losses)
+        q = qs[i].unsqueeze(0).requires_grad_()
+
+    # Sampling loop
+    q_ema = q
+    opt = torch.optim.AdamW([q], lr=0.03, betas=(0.0, 0.999))
+    loop = tqdm(range(steps))
+    for i in loop:
+        opt.zero_grad()
+        w = q * w
+        image = g.synthesis(w + g.mapping.w_avg, noise_mode='const')
+        embed = embed_image(image.add(1).div(2))
+        loss = prompts_dist_loss(embed, targets, spherical_dist_loss).mean()
+        loss.backward()
+        opt.step()
+        loop.set_postfix(loss=loss.item(), q_magnitude=q.std().item())
+
+        q_ema = q_ema * 0.9 + q * 0.1
+        image = g.synthesis(q_ema * w + g.mapping.w_avg, noise_mode='const')
+
+        if i % 10 == 0:
+            display(TF.to_pil_image(tf(image)[0]))
+            print(f"Image {i}/{steps} | Current loss: {loss}")
+        pil_image = TF.to_pil_image(image[0].add(1).div(2).clamp(0, 1))
+        os.makedirs(f'samples/{timestring}', exist_ok=True)
+        pil_image.save(f'samples/{timestring}/{i:04}.jpg')
+
+
+def timestring_run(data: SeedSchema, model: ModelOptionEnum):
+    seeds, targets = seeding(data)
+
+    try:
+        timestrings = []
+        for seed in seeds:
+            timestring = time.strftime('%Y%m%d%H%M%S')
+            timestrings.append(timestring)
+            run(timestring, seed, model, targets, data.steps)
+
+        return timestrings
+    except KeyboardInterrupt:
+        pass
+
+
+def generate_image(data: SeedSchema, model: ModelOptionEnum, archive_name: str = Body(...)):
+    # timestrings = timestring_run(data, model)
+
+    folder = os.path.abspath("files/samples")
+
+    archive_name = slugify(archive_name)
+
+    if archive_name != "optional":
+        fname = archive_name
+        # os.rename(f'samples/{timestring}', f'samples/{fname}')
+    else:
+        fname = timestring
+
+    # Save images as a tar archive
+    for fname in timestrings:
+        if not os.path.exists(folder):
+            os.makedirs(folder)
+
+        file_name = f"{fname}.tar"
+        file_path = os.path.abspath(f"{folder}/{file_name}")
+
+        p = subprocess.Popen(f"!tar cf {file_path} {folder}/{timestring}", stdout=subprocess.PIPE, shell=True)
+        print(p.communicate())
+
+        return FileResponse(path=file_path, filename=file_name, media_type='application/x-tar')
+
+
+def generate_video(data: SeedSchema, model: ModelOptionEnum, video_name: str = Body(...)):
+    timestrings = timestring_run(data, model)
+
+    folder = os.path.abspath("files/samples")
+
+    for timestring in timestrings:
+        frames = os.listdir(f"{folder}/{timestring}")
+        frames = len(list(filter(lambda filename: filename.endswith(".jpg"), frames)))  # Get number of jpg generated
+
+        init_frame = 1  # This is the frame where the video will start
+        last_frame = frames  # You can change i to the number of the last frame you want to generate. It will raise an error if that number of frames does not exist.
+
+        min_fps = 10
+        max_fps = 60
+
+        total_frames = last_frame - init_frame
+
+        # Desired video time in seconds
+        video_length = 14  # @param {type:"number"}
+
+        # Video filename
+        video_name = slugify(video_name)
+
+        if not video_name:
+            video_name = "video_" + timestring
+
+        fps = np.clip(total_frames / video_length, min_fps, max_fps)
+
+        video_name = f"{video_name}.mp4"
+        video_path = os.path.abspath(f"{folder}/{video_name}")
+        image_path = os.path.abspath(f"{folder}/{timestring}/%04d.jpg")
+
+        print("Generating video...")
+        cmd = f"ffmpeg -r {fps} -i {image_path} -c:v libx264 -vf fps={fps} -pix_fmt yuv420p {video_path} -frames:v {total_frames}"
+        p = subprocess.Popen(cmd, stdout=subprocess.PIPE, shell=True)
+        print(p.communicate())
+
+        print("The video is ready")
+
+        FileResponse(path=video_path, filename=video_name, media_type='video/mp4')
+
+    return {"msg": "Video downloaded"}
