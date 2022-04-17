@@ -4,7 +4,7 @@ from fastapi import APIRouter, UploadFile, File, Body
 
 from app.con import con
 from app.crud.models import download, retrieve_models, retrieve_model, upload
-from app.crud.processes import w_stds, G, generate_image, generate_video
+from app.crud.processes import w_stds, G, generate_image, generate_video, seeding, timestring_run
 from app.schemas import ModelSelectionSchema, ModelOptionEnum, SeedSchema
 
 router = APIRouter()
@@ -122,12 +122,26 @@ def get_models(model: ModelOptionEnum):
 
 @router.get("/G")
 def get_G(model: ModelOptionEnum):
-    return G(model)
+    G(model)
+    return True
 
 
 @router.get("/w_stds")
 def get_w_stds(model: ModelOptionEnum):
-    return w_stds(model)
+    w_stds(model)
+    return True
+
+
+@router.post("/generate_seeds")
+def generate_seeds(data: SeedSchema):
+    seeding(data)
+    return True
+
+
+@router.post("/run_timestring")
+def run_timestring(data: SeedSchema, model: ModelOptionEnum):
+    timestring_run(data, model)
+    return True
 
 
 @router.post("/process_image")

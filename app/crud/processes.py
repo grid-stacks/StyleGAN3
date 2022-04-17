@@ -173,17 +173,16 @@ def embed_url(url):
 
 
 def G(model: ModelOptionEnum):
+    print("--1")
     try:
         model = retrieve_model(model)
-        print(model)
+        print("--1 a")
         with open(model["file"], 'rb') as fp:
+            print("--1 b")
             try:
-                print("-- 1")
-                print(gan3_path)
-                print(fp)
+                print("--1 c")
                 g = pickle.load(fp)['G_ema'].to(device)
-                print("-- 2")
-                print(g)
+                print("--1 d")
                 return g
             except Exception as e:
                 print('-- 3', e)
@@ -191,20 +190,27 @@ def G(model: ModelOptionEnum):
     except ModuleNotFoundError as e:
         return {"error": str(e)}
 
+    print("--1 z")
+
 
 def w_stds(model: ModelOptionEnum):
+    print("--2")
     try:
         g = G(model)
-
+        print("--2 a")
         zs = torch.randn([10000, g.mapping.z_dim], device=device)
+        print("--2 b")
         w = g.mapping(zs, None).std(0)
-        print(w)
+        print("--2 c")
         return g, w
     except Exception as e:
-        print('--l195', e)
+        print('--l199', e)
+
+    print("--2 z")
 
 
 def seeding(data: SeedSchema):
+    print("--3")
     seeds = [data.seed_1, data.seed_2, data.seed_3]
 
     if data.seed_1 == -1:
@@ -215,31 +221,45 @@ def seeding(data: SeedSchema):
 
     targets = [clip_model.embed_text(text) for text in texts]
 
+    print("--3 z")
+
     return seeds, targets
 
 
 def run(timestring, seed, model: ModelOptionEnum, targets, steps):
+    print("--4")
     g, w = w_stds(model)
+    print("--4 a")
 
     torch.manual_seed(seed)
+    print("--4 b")
 
     # Init
     # Sample 32 inits and choose the one closest to prompt
 
     with torch.no_grad():
+        print("--4 c")
         qs = []
         losses = []
         for _ in range(8):
+            print("--4 d")
             q = (g.mapping(torch.randn([4, g.mapping.z_dim], device=device), None,
                            truncation_psi=0.7) - g.mapping.w_avg) / w
+            print("--4 e")
             images = g.synthesis(q * w + g.mapping.w_avg)
+            print("--4 f")
             embeds = embed_image(images.add(1).div(2))
+            print("--4 g")
             loss = prompts_dist_loss(embeds, targets, spherical_dist_loss).mean(0)
+            print("--4 h")
             i = torch.argmin(loss)
             qs.append(q[i])
             losses.append(loss[i])
+            print("--4 i")
         qs = torch.stack(qs)
+        print("--4 j")
         losses = torch.stack(losses)
+        print("--4 k")
         # print(losses)
         # print(losses.shape, qs.shape)
         i = torch.argmin(losses)
@@ -268,6 +288,7 @@ def run(timestring, seed, model: ModelOptionEnum, targets, steps):
         pil_image = TF.to_pil_image(image[0].add(1).div(2).clamp(0, 1))
         os.makedirs(f'samples/{timestring}', exist_ok=True)
         pil_image.save(f'samples/{timestring}/{i:04}.jpg')
+        print("--6")
 
 
 def timestring_run(data: SeedSchema, model: ModelOptionEnum):
@@ -277,6 +298,7 @@ def timestring_run(data: SeedSchema, model: ModelOptionEnum):
         timestrings = []
         for seed in seeds:
             timestring = time.strftime('%Y%m%d%H%M%S')
+            print("--7", timestring)
             timestrings.append(timestring)
             run(timestring, seed, model, targets, data.steps)
 
