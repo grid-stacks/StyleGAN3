@@ -22,4 +22,5 @@ torchvision
 
 git+https://github.com/openai/CLIP
 
-torch-utils
+# torch-utils
+scipy
