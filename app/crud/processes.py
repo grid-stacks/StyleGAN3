@@ -195,6 +195,8 @@ def G(model: ModelOptionEnum):
 
 def w_stds(model: ModelOptionEnum):
     print("--2")
+    p = subprocess.Popen(f"nvcc -V", stdout=subprocess.PIPE, shell=True)
+    print(p.communicate())
     try:
         g = G(model)
         print("--2 a")
@@ -286,29 +288,33 @@ def run(timestring, seed, model: ModelOptionEnum, targets, steps):
             display(TF.to_pil_image(tf(image)[0]))
             print(f"Image {i}/{steps} | Current loss: {loss}")
         pil_image = TF.to_pil_image(image[0].add(1).div(2).clamp(0, 1))
-        os.makedirs(f'samples/{timestring}', exist_ok=True)
-        pil_image.save(f'samples/{timestring}/{i:04}.jpg')
-        print("--6")
+        os.makedirs(f'files/samples/{timestring}', exist_ok=True)
+        pil_image.save(f'files/samples/{timestring}/{i:04}.jpg')
+        print("--4 loop")
 
 
 def timestring_run(data: SeedSchema, model: ModelOptionEnum):
+    print("--5")
     seeds, targets = seeding(data)
 
     try:
         timestrings = []
         for seed in seeds:
             timestring = time.strftime('%Y%m%d%H%M%S')
-            print("--7", timestring)
+            print("--5", timestring)
             timestrings.append(timestring)
             run(timestring, seed, model, targets, data.steps)
 
+        print("--5 return")
         return timestrings
     except KeyboardInterrupt:
+        print("--5 error")
         pass
 
 
 def generate_image(data: SeedSchema, model: ModelOptionEnum, archive_name: str = Body(...)):
-    # timestrings = timestring_run(data, model)
+    timestrings = timestring_run(data, model)
+    print("--6", timestrings)
 
     folder = os.path.abspath("files/samples")
 
@@ -318,20 +324,25 @@ def generate_image(data: SeedSchema, model: ModelOptionEnum, archive_name: str =
         fname = archive_name
         # os.rename(f'samples/{timestring}', f'samples/{fname}')
     else:
+        timestring = time.strftime('%Y%m%d%H%M%S')
         fname = timestring
 
     # Save images as a tar archive
-    for fname in timestrings:
+    for timestring in timestrings:
         if not os.path.exists(folder):
             os.makedirs(folder)
 
-        file_name = f"{fname}.tar"
-        file_path = os.path.abspath(f"{folder}/{file_name}")
+        file_name = f"{timestring}.tar"
+        file_path = f"{folder}/{file_name}"
 
-        p = subprocess.Popen(f"!tar cf {file_path} {folder}/{timestring}", stdout=subprocess.PIPE, shell=True)
+        print("--6", file_name)
+        print("--6", file_path)
+        print("--6", f"tar cf {file_path} {folder}/{timestring}")
+
+        p = subprocess.Popen(f"tar cf {file_path} {folder}/{timestring}", stdout=subprocess.PIPE, shell=True)
         print(p.communicate())
 
-        return FileResponse(path=file_path, filename=file_name, media_type='application/x-tar')
+        FileResponse(path=file_path, filename=file_name, media_type='application/x-tar')
 
 
 def generate_video(data: SeedSchema, model: ModelOptionEnum, video_name: str = Body(...)):
